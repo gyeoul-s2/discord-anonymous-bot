@@ -12,72 +12,107 @@ const client = new Client({
     partials: [Partials.Channel]
 });
 
+// ------------------
+// 設定
+// ------------------
 let settings = {
     targetChannelId: null,
-    logChannelId: null
+    logChannelId: null,
+    replyText: "✅ あなたのメッセージは匿名で送信されました！",
+    anonPrefix: "🔒 **匿名メッセージ**\n",
+    logPrefix: "📋 **匿名メッセージログ**\n"
 };
 
-// 設定ファイル読み込み
 if (fs.existsSync("settings.json")) {
     settings = JSON.parse(fs.readFileSync("settings.json", "utf8"));
 }
-
 function saveSettings() {
     fs.writeFileSync("settings.json", JSON.stringify(settings, null, 2));
 }
 
+const OWNER_ID = process.env.OWNER_ID;
+
+// ------------------
+// 起動
+// ------------------
 client.on("ready", () => {
     console.log(`Logged in as ${client.user.tag}`);
 });
 
-// =======================
-// 管理用コマンド
-// =======================
+// ------------------
+// 管理者（あなた）専用：DMで設定変更
+// ------------------
 client.on("messageCreate", async (msg) => {
-    if (msg.author.bot) return;
+    if (msg.channel.type !== 1) return; // DM以外は無視
+    if (msg.author.id !== OWNER_ID) return; // あなた以外のDMは匿名投稿扱い
 
-    // チャンネル設定
-    if (msg.content.startsWith("!set-target")) {
-        const channel = msg.mentions.channels.first();
-        if (!channel) return msg.reply("チャンネルをメンションしてください");
+    const content = msg.content.trim();
 
-        settings.targetChannelId = channel.id;
+    // set target
+    if (content.startsWith("set target")) {
+        const id = content.split(" ")[2];
+        settings.targetChannelId = id;
         saveSettings();
-        return msg.reply(`ターゲットチャンネルを <#${channel.id}> に設定しました！`);
+        return msg.reply(`ターゲットチャンネルIDを **${id}** に設定しました`);
     }
 
-    if (msg.content.startsWith("!set-log")) {
-        const channel = msg.mentions.channels.first();
-        if (!channel) return msg.reply("チャンネルをメンションしてください");
-
-        settings.logChannelId = channel.id;
+    // set log
+    if (content.startsWith("set log")) {
+        const id = content.split(" ")[2];
+        settings.logChannelId = id;
         saveSettings();
-        return msg.reply(`ログチャンネルを <#${channel.id}> に設定しました！`);
+        return msg.reply(`ログチャンネルIDを **${id}** に設定しました`);
+    }
+
+    // set reply
+    if (content.startsWith("set reply")) {
+        const text = content.replace("set reply", "").trim();
+        settings.replyText = text;
+        saveSettings();
+        return msg.reply(`返信メッセージを更新しました：\n${text}`);
+    }
+
+    // set anon
+    if (content.startsWith("set anon")) {
+        const text = content.replace("set anon", "").trim();
+        settings.anonPrefix = text + "\n";
+        saveSettings();
+        return msg.reply(`匿名メッセージのprefixを更新しました：\n${text}`);
+    }
+
+    // set logtext
+    if (content.startsWith("set logtext")) {
+        const text = content.replace("set logtext", "").trim();
+        settings.logPrefix = text + "\n";
+        saveSettings();
+        return msg.reply(`ログメッセージのprefixを更新しました：\n${text}`);
     }
 });
 
-// =======================
-// DM受信 → 匿名メッセージ送信
-// =======================
+// ------------------
+// 一般ユーザーのDM → 匿名メッセージ
+// ------------------
 client.on("messageCreate", async (msg) => {
-    if (msg.channel.type !== 1) return; // DM以外は無視
+    if (msg.channel.type !== 1) return; // DM以外無視
     if (msg.author.bot) return;
+    if (msg.author.id === OWNER_ID) return; // 管理者のDMは設定コマンド扱い
 
-    if (!settings.targetChannelId)
+    if (!settings.targetChannelId) {
         return msg.reply("❌ まだターゲットチャンネルが設定されていません。管理者に伝えてください。");
+    }
 
-    // 1) DM送信者へ返信
-    await msg.reply("✅ あなたのメッセージは匿名で送信されました！");
+    // 返信
+    await msg.reply(settings.replyText);
 
-    // 2) 匿名メッセージ送信
+    // 匿名メッセージ送信
     const targetChannel = await client.channels.fetch(settings.targetChannelId);
-    await targetChannel.send(`🔒 **匿名メッセージ**\n${msg.content}`);
+    await targetChannel.send(`${settings.anonPrefix}${msg.content}`);
 
-    // 3) ログ送信
+    // ログ送信
     if (settings.logChannelId) {
         const logChannel = await client.channels.fetch(settings.logChannelId);
         await logChannel.send(
-            `📋 **匿名メッセージログ**\n` +
+            settings.logPrefix +
             `送信者: ${msg.author.username} (ID: ${msg.author.id})\n` +
             `日時: ${new Date().toISOString()}\n` +
             `内容: ${msg.content}\n` +
@@ -86,4 +121,5 @@ client.on("messageCreate", async (msg) => {
     }
 });
 
+// ------------------
 client.login(process.env.DISCORD_TOKEN);
