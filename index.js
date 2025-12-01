@@ -40,6 +40,7 @@ const OWNER_ID = process.env.OWNER_ID;
 
 // ------------------
 // HTTPサーバー（Render Web Service用）
+// ------------------
 const port = process.env.PORT || 3000;
 http.createServer((req, res) => {
     res.writeHead(200);
@@ -54,13 +55,15 @@ client.on("ready", () => {
 });
 
 // ------------------
-// 管理者 DM コマンド
+// 管理者 DM コマンド（OWNER のみ）
+// ------------------
 client.on("messageCreate", async (msg) => {
     if (!msg.channel.isDMBased()) return;
-    if (msg.author.id !== OWNER_ID) return;
+    if (msg.author.id !== OWNER_ID) return; // OWNER以外はコマンド使えない
 
     const content = msg.content.trim();
 
+    // ---- コマンド一覧 ----
     if (content.startsWith("set target")) {
         const id = content.split(" ")[2];
         settings.targetChannelId = id;
@@ -106,15 +109,29 @@ client.on("messageCreate", async (msg) => {
             `ログprefix: ${settings.logPrefix}`
         );
     }
+
+    // ⚠ OWNER の「コマンドじゃない DM」は匿名送信に回したいので
+    // ここでは return しない！！
 });
 
 // ------------------
-// ユーザー DM → 匿名送信（Embed・複数添付対応）
+// 匿名送信（OWNER も一般ユーザーも含む）
+// ------------------
 client.on("messageCreate", async (msg) => {
     if (!msg.channel.isDMBased()) return;
     if (msg.author.bot) return;
-    if (msg.author.id === OWNER_ID) return;
 
+    // ただし OWNER のコマンドだけは除外（コマンドは上のハンドラで処理済）
+    const isOwnerCommand =
+        msg.author.id === OWNER_ID &&
+        (
+            msg.content.startsWith("set ") ||
+            msg.content === "show settings"
+        );
+
+    if (isOwnerCommand) return; // コマンドは処理完了済みなので匿名送信に流さない
+
+    // ---- 匿名送信処理 ----
     if (!settings.targetChannelId) {
         return msg.reply("❌ まだターゲットチャンネルが設定されていません。");
     }
@@ -133,7 +150,9 @@ client.on("messageCreate", async (msg) => {
         .setColor(0x00FFAA)
         .setTimestamp();
 
-    files.forEach(file => anonEmbed.addFields({ name: "添付ファイル", value: file.name || "file" }));
+    files.forEach(file =>
+        anonEmbed.addFields({ name: "添付ファイル", value: file.name || "file" })
+    );
 
     const target = await client.channels.fetch(settings.targetChannelId);
     await target.send({ embeds: [anonEmbed], files: files });
@@ -151,7 +170,7 @@ client.on("messageCreate", async (msg) => {
             );
 
         await client.channels.fetch(settings.logChannelId)
-            .then(ch => ch.send({ embeds: [logEmbed], files: files }));
+            .then(ch => ch.send({ embeds: [logEmbed], files }));
     }
 });
 
