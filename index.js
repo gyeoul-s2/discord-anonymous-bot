@@ -2,6 +2,16 @@ import { Client, GatewayIntentBits } from "discord.js";
 import dotenv from "dotenv";
 dotenv.config();
 
+// === ここから追加（ダミーWebサーバー） ===
+import express from "express";
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get("/", (req, res) => res.send("Bot is running"));
+app.listen(PORT, () => console.log(`HTTP server running on ${PORT}`));
+// === 追加ここまで ===
+
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -9,7 +19,7 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.DirectMessages
   ],
-  partials: ["CHANNEL"] // DM 受取必須
+  partials: ["CHANNEL"]
 });
 
 const TARGET_CHANNEL = process.env.TARGET_CHANNEL;
@@ -20,15 +30,12 @@ client.on("ready", () => {
 });
 
 client.on("messageCreate", async (msg) => {
-  // ボット自身やサーバー内メッセージは無視
   if (msg.author.bot) return;
   if (!msg.channel.isDMBased()) return;
 
-  // 匿名転送
   const target = await client.channels.fetch(TARGET_CHANNEL);
   await target.send(msg.content);
 
-  // ログ
   const log = await client.channels.fetch(LOG_CHANNEL);
   await log.send(
     `匿名メッセージ送信: from **${msg.author.id}**\n内容: ${msg.content}`
