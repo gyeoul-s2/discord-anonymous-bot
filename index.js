@@ -1,6 +1,10 @@
 import { Client, GatewayIntentBits, Partials, AttachmentBuilder, EmbedBuilder } from "discord.js";
 import fs from "fs";
+import http from "http";
 
+// ------------------
+// Discord Client
+// ------------------
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -35,13 +39,22 @@ function saveSettings() {
 const OWNER_ID = process.env.OWNER_ID;
 
 // ------------------
+// HTTPサーバー（Render Web Service用）
+const port = process.env.PORT || 3000;
+http.createServer((req, res) => {
+    res.writeHead(200);
+    res.end("Bot is running");
+}).listen(port, () => {
+    console.log(`HTTP server listening on port ${port}`);
+});
+
+// ------------------
 client.on("ready", () => {
     console.log(`Logged in as ${client.user.tag}`);
 });
 
 // ------------------
-// 管理者（あなた）専用：DMコマンド
-// ------------------
+// 管理者 DM コマンド
 client.on("messageCreate", async (msg) => {
     if (!msg.channel.isDMBased()) return;
     if (msg.author.id !== OWNER_ID) return;
@@ -96,8 +109,7 @@ client.on("messageCreate", async (msg) => {
 });
 
 // ------------------
-// 一般ユーザー：DM → 匿名送信（Embed・複数添付対応）
-// ------------------
+// ユーザー DM → 匿名送信（Embed・複数添付対応）
 client.on("messageCreate", async (msg) => {
     if (!msg.channel.isDMBased()) return;
     if (msg.author.bot) return;
@@ -110,11 +122,11 @@ client.on("messageCreate", async (msg) => {
     // DM返信
     await msg.reply(settings.replyText);
 
-    // 添付ファイルを AttachmentBuilder に変換
+    // 添付ファイル
     const files = [];
     msg.attachments.forEach(att => files.push(new AttachmentBuilder(att.url)));
 
-    // 匿名メッセージをEmbedで送信
+    // 匿名メッセージ Embed
     const anonEmbed = new EmbedBuilder()
         .setTitle("匿名メッセージ")
         .setDescription(msg.content || "(テキストなし)")
