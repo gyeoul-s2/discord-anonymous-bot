@@ -1,6 +1,5 @@
-// index.js
-const { Client, GatewayIntentBits, Partials } = require("discord.js");
-const fs = require("fs");
+import { Client, GatewayIntentBits, Partials, AttachmentBuilder, EmbedBuilder } from "discord.js";
+import fs from "fs";
 
 const client = new Client({
     intents: [
@@ -9,15 +8,15 @@ const client = new Client({
         GatewayIntentBits.DirectMessages,
         GatewayIntentBits.MessageContent
     ],
-    partials: [Partials.Channel]
+    partials: [Partials.Channel, Partials.Message, Partials.Reaction]
 });
 
 // ------------------
-// 設定
+// 設定ロード
 // ------------------
 let settings = {
-    targetChannelId: null,
-    logChannelId: null,
+    targetChannelId: "",
+    logChannelId: "",
     replyText: "✅ あなたのメッセージは匿名で送信されました！",
     anonPrefix: "🔒 **匿名メッセージ**\n",
     logPrefix: "📋 **匿名メッセージログ**\n"
@@ -25,7 +24,10 @@ let settings = {
 
 if (fs.existsSync("settings.json")) {
     settings = JSON.parse(fs.readFileSync("settings.json", "utf8"));
+} else {
+    fs.writeFileSync("settings.json", JSON.stringify(settings, null, 2));
 }
+
 function saveSettings() {
     fs.writeFileSync("settings.json", JSON.stringify(settings, null, 2));
 }
@@ -33,91 +35,111 @@ function saveSettings() {
 const OWNER_ID = process.env.OWNER_ID;
 
 // ------------------
-// 起動
-// ------------------
 client.on("ready", () => {
     console.log(`Logged in as ${client.user.tag}`);
 });
 
 // ------------------
-// 管理者（あなた）専用：DMで設定変更
+// 管理者（あなた）専用：DMコマンド
 // ------------------
 client.on("messageCreate", async (msg) => {
-    if (msg.channel.type !== 1) return; // DM以外は無視
-    if (msg.author.id !== OWNER_ID) return; // あなた以外のDMは匿名投稿扱い
+    if (!msg.channel.isDMBased()) return;
+    if (msg.author.id !== OWNER_ID) return;
 
     const content = msg.content.trim();
 
-    // set target
     if (content.startsWith("set target")) {
         const id = content.split(" ")[2];
         settings.targetChannelId = id;
         saveSettings();
-        return msg.reply(`ターゲットチャンネルIDを **${id}** に設定しました`);
+        return msg.reply(`ターゲットチャンネルを **${id}** に設定しました`);
     }
 
-    // set log
     if (content.startsWith("set log")) {
         const id = content.split(" ")[2];
         settings.logChannelId = id;
         saveSettings();
-        return msg.reply(`ログチャンネルIDを **${id}** に設定しました`);
+        return msg.reply(`ログチャンネルを **${id}** に設定しました`);
     }
 
-    // set reply
     if (content.startsWith("set reply")) {
         const text = content.replace("set reply", "").trim();
         settings.replyText = text;
         saveSettings();
-        return msg.reply(`返信メッセージを更新しました：\n${text}`);
+        return msg.reply("返信メッセージを更新しました！");
     }
 
-    // set anon
     if (content.startsWith("set anon")) {
         const text = content.replace("set anon", "").trim();
         settings.anonPrefix = text + "\n";
         saveSettings();
-        return msg.reply(`匿名メッセージのprefixを更新しました：\n${text}`);
+        return msg.reply("匿名メッセージのprefixを更新しました！");
     }
 
-    // set logtext
     if (content.startsWith("set logtext")) {
         const text = content.replace("set logtext", "").trim();
         settings.logPrefix = text + "\n";
         saveSettings();
-        return msg.reply(`ログメッセージのprefixを更新しました：\n${text}`);
+        return msg.reply("ログメッセージのprefixを更新しました！");
+    }
+
+    if (content === "show settings") {
+        return msg.reply(
+            `📌 現在の設定:\n` +
+            `ターゲットチャンネルID: ${settings.targetChannelId}\n` +
+            `ログチャンネルID: ${settings.logChannelId}\n` +
+            `DM返信メッセージ: ${settings.replyText}\n` +
+            `匿名メッセージprefix: ${settings.anonPrefix}\n` +
+            `ログprefix: ${settings.logPrefix}`
+        );
     }
 });
 
 // ------------------
-// 一般ユーザーのDM → 匿名メッセージ
+// 一般ユーザー：DM → 匿名送信（Embed・複数添付対応）
 // ------------------
 client.on("messageCreate", async (msg) => {
-    if (msg.channel.type !== 1) return; // DM以外無視
+    if (!msg.channel.isDMBased()) return;
     if (msg.author.bot) return;
-    if (msg.author.id === OWNER_ID) return; // 管理者のDMは設定コマンド扱い
+    if (msg.author.id === OWNER_ID) return;
 
     if (!settings.targetChannelId) {
-        return msg.reply("❌ まだターゲットチャンネルが設定されていません。管理者に伝えてください。");
+        return msg.reply("❌ まだターゲットチャンネルが設定されていません。");
     }
 
-    // 返信
+    // DM返信
     await msg.reply(settings.replyText);
 
-    // 匿名メッセージ送信
-    const targetChannel = await client.channels.fetch(settings.targetChannelId);
-    await targetChannel.send(`${settings.anonPrefix}${msg.content}`);
+    // 添付ファイルを AttachmentBuilder に変換
+    const files = [];
+    msg.attachments.forEach(att => files.push(new AttachmentBuilder(att.url)));
 
-    // ログ送信
+    // 匿名メッセージをEmbedで送信
+    const anonEmbed = new EmbedBuilder()
+        .setTitle("匿名メッセージ")
+        .setDescription(msg.content || "(テキストなし)")
+        .setColor(0x00FFAA)
+        .setTimestamp();
+
+    files.forEach(file => anonEmbed.addFields({ name: "添付ファイル", value: file.name || "file" }));
+
+    const target = await client.channels.fetch(settings.targetChannelId);
+    await target.send({ embeds: [anonEmbed], files: files });
+
+    // ログ
     if (settings.logChannelId) {
-        const logChannel = await client.channels.fetch(settings.logChannelId);
-        await logChannel.send(
-            settings.logPrefix +
-            `送信者: ${msg.author.username} (ID: ${msg.author.id})\n` +
-            `日時: ${new Date().toISOString()}\n` +
-            `内容: ${msg.content}\n` +
-            `添付ファイル数: ${msg.attachments.size}`
-        );
+        const logEmbed = new EmbedBuilder()
+            .setTitle("匿名メッセージログ")
+            .setColor(0xAAAAAA)
+            .setTimestamp()
+            .addFields(
+                { name: "送信者", value: `${msg.author.username} (ID: ${msg.author.id})` },
+                { name: "内容", value: msg.content || "(テキストなし)" },
+                { name: "添付ファイル数", value: `${msg.attachments.size}` }
+            );
+
+        await client.channels.fetch(settings.logChannelId)
+            .then(ch => ch.send({ embeds: [logEmbed], files: files }));
     }
 });
 
